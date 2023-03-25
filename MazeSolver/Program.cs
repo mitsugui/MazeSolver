@@ -1,54 +1,73 @@
-﻿{
-	const int width = 8;
-	const int height = 7;
+﻿using System.Text;
 
-	var maze = new Maze(new[]
-	{
-		Maze.Start, 0, 0, 0, 0, 0, 0, 0,
-		0, 0, 0, 0, 1, 0, 0, 0,
-		0, 0, 1, 0, 1, 1, 0, 0,
-		0, 1, 1, 0, 0, 1, 1, 0,
-		0, 0, 1, 0, 1, 1, 0, 0,
-		0, 0, 0, 0, 1, 0, 0, 0,
-		0, 0, 0, 0, 0, 0, 0, Maze.End,
-	}, width, height);
+{
+	const int width = 85;
+	const int height = 65;
 
+	const string filePath = "input.txt";
+
+	var print = false;
+	
+	var cells = await LoadCellsAsync(filePath);
+
+	var maze = new Maze(cells, width, height);
+	
 	const int endRow = height - 1;
 	const int endCol = width - 1;
-	var solver = new MazeSolver(width, height, 0, 0);
-	while (!solver.IsSolved(endRow, endCol))
+	
+	var solver = new MazeSolver(width, height, 0, 0, endRow, endCol);
+	while (!solver.IsSolved())
 	{
-		maze.PrintCount();
+		if (print)
+		{
+			maze.PrintCount();
 
-		maze.PrintCells();
+			maze.PrintCells();
+		}
+
 		maze.NextStep();
 
 		solver.CalculatePossiblePositions(maze.Cells);
 
-		solver.PrintMovements();
-
-		Console.WriteLine("Press any key to continue or ESC to quit");
-		var key = Console.ReadKey();
-
-		if (key.Key == ConsoleKey.Escape) break;
+		if (print) solver.PrintMovements();
 	}
 
-	solver.PrintSolution(endRow, endCol);
-
-	Console.ReadKey();
-
-	solver.PrintGame(new Maze(new[]
+	if (print)
 	{
-		Maze.Start, 0, 0, 0, 0, 0, 0, 0,
-		0, 0, 0, 0, 1, 0, 0, 0,
-		0, 0, 1, 0, 1, 1, 0, 0,
-		0, 1, 1, 0, 0, 1, 1, 0,
-		0, 0, 1, 0, 1, 1, 0, 0,
-		0, 0, 0, 0, 1, 0, 0, 0,
-		0, 0, 0, 0, 0, 0, 0, Maze.End,
-	}, width, height), endRow, endCol);
-	
+		solver.PrintSolutionMatrix();
+
+		solver.PrintSolution();
+
+		Console.ReadKey();
+
+		var newMaze = new Maze(await LoadCellsAsync(filePath), width, height);
+		solver.PrintGame(newMaze);
+	}
+
+	solver.SaveSolution("solution.txt");
+
+	Console.WriteLine("Press any key to finish...");
 	Console.ReadKey();
+}
+
+
+async Task<IReadOnlyList<int>> LoadCellsAsync(string inputTxt)
+{
+	var cells = new List<int>();
+	using (var reader = new StreamReader(inputTxt, Encoding.UTF8))
+	{
+		while (true)
+		{
+			var rowText = await reader.ReadLineAsync();
+
+			if (rowText == null) break;
+
+			cells.AddRange(rowText.Split(' ')
+				.Select(txt => Convert.ToInt32(txt)));
+		}
+	}
+
+	return cells;
 }
 
 public class Maze
@@ -62,9 +81,9 @@ public class Maze
 
 	public int Height { get; }
 
-	public int[] Cells { get; private set; }
+	public IReadOnlyList<int> Cells { get; private set; }
 
-	public Maze(int[] cells, int width, int height)
+	public Maze(IReadOnlyList<int> cells, int width, int height)
 	{
 		Width = width;
 		Height = height;
@@ -135,10 +154,10 @@ public class Maze
 		foreach (var neighborsCount in CalculateNeighborsCount(cells, width, height))
 		{
 			yield return neighborsCount >= 0
-				? neighborsCount >= 2 && neighborsCount <= 3
+				? neighborsCount > 1 && neighborsCount < 5
 					? Green
 					: White
-				: neighborsCount >= -4 && neighborsCount <= -2
+				: neighborsCount > -5 && neighborsCount < -2
 					? Green
 					: White;
 		}
@@ -229,7 +248,11 @@ public class MazeSolver
 
 	public int Height { get; }
 
-	public MazeSolver(int width, int height, int startRow, int startColumn)
+	public int EndRow { get; }
+
+	public int EndColumn { get; }
+
+	public MazeSolver(int width, int height, int startRow, int startColumn, int endRow, int endColumn)
 	{
 		Width = width;
 		Height = height;
@@ -237,6 +260,8 @@ public class MazeSolver
 		{
 			new() { { (startRow, startColumn), ((-1, -1), '\0') } }
 		};
+		EndRow = endRow;
+		EndColumn = endColumn;
 	}
 
 	public void CalculatePossiblePositions(IReadOnlyList<int> mazeCells)
@@ -280,14 +305,14 @@ public class MazeSolver
 		Paths.Add(currentStep);
 	}
 
-	public bool IsSolved(int endRow, int endColumn)
+	public bool IsSolved()
 	{
-		return Paths.Last().ContainsKey((endRow, endColumn));
+		return Paths.Last().ContainsKey((EndRow, EndColumn));
 	}
 
-	public void PrintSolution(int endRow, int endColumn)
+	public void PrintSolutionMatrix()
 	{
-		var path = GetPathAndMovements(endRow, endColumn, out var movements);
+		var path = GetPathAndMovements(out _);
 
 		Console.WriteLine("--- Solution ----");
 		for (var idx = 0; idx < path.Count; idx++)
@@ -301,7 +326,7 @@ public class MazeSolver
 				Console.Write("|");
 				for (var col = 0; col < Width; col++)
 				{
-					Console.Write(path[idx]  == (row, col) ? idx : " ");
+					Console.Write(path[idx] == (row, col) ? idx.ToString() : " ");
 				}
 				Console.WriteLine("|");
 			}
@@ -309,7 +334,12 @@ public class MazeSolver
 			Console.Write(new string('-', 2 * Width));
 			Console.WriteLine("|");
 		}
+	}
 
+	public void PrintSolution()
+	{
+		var path = GetPathAndMovements(out var movements);
+		
 		Console.WriteLine("---- Movements --------");
 		for (var idx = 0; idx < path.Count; idx++)
 		{
@@ -341,19 +371,30 @@ public class MazeSolver
 		Console.WriteLine("|");
 	}
 
-	public void PrintGame(Maze maze, int endRow, int endColumn)
+	public void PrintGame(Maze maze)
 	{
-		var path = GetPathAndMovements(endRow, endColumn, out var movements);
+		var path = GetPathAndMovements(out var movements);
 		for (var i = 0; i < path.Count; i++)
 		{
 			maze.PrintCells(path[i].Row, path[i].Column, i < movements.Count ? movements[i].ToString() : "X");
 			maze.NextStep();
 		}
 	}
-	
-	private List<(int Row, int Column)> GetPathAndMovements(int endRow, int endColumn, out List<char> movements)
+
+	public void SaveSolution(string textFile)
 	{
-		var current = (endRow, endColumn);
+		using var writer = new StreamWriter(textFile, false, Encoding.UTF8);
+
+		GetPathAndMovements(out var movements);
+		foreach (var movement in movements)
+		{
+			writer.Write($"{movement} ");
+		}
+	}
+
+	private List<(int Row, int Column)> GetPathAndMovements(out List<char> movements)
+	{
+		var current = (EndRow, EndColumn);
 		var path = new List<(int Row, int Column)> { current };
 		movements = new List<char>();
 		for (var i = Paths.Count - 1; i >= 0; i--)
